@@ -1,0 +1,6 @@
+# Fichiers compilés
+proxy.exe
+*.exe
+
+# Configuration IDE
+.vscode/
