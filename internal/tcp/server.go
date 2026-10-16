@@ -2,53 +2,66 @@ package tcp
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strings"
 )
 
 func StartServer(port string) {
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
-		fmt.Println("Erreur lors du démarrage du serveur:", err)
+		fmt.Println("Erreur lors du démarrage :", err)
 		os.Exit(1)
 	}
 	defer listener.Close()
 
-	fmt.Println("Serveur en écoute sur le port", port, "...")
+	fmt.Println("Proxy en écoute sur le port", port, "...")
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Erreur de connexion:", err)
 			continue
 		}
-
-		fmt.Println("Nouveau client connecté :", conn.RemoteAddr())
 		go handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
+func handleConnection(clientConn net.Conn) {
+	defer clientConn.Close()
 
-	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
+	buffer := make([]byte, 4096)
+	n, err := clientConn.Read(buffer)
 	if err != nil {
 		return
 	}
 
 	requete := string(buffer[:n])
-	fmt.Println("\n=== Nouvelle Requête HTTP ===")
-	fmt.Println(requete)
-	fmt.Println("=============================")
+	lignes := strings.Split(requete, "\n")
+	premiereLigne := strings.TrimSpace(lignes[0])
+	fmt.Println("->", premiereLigne)
 
-	body := "<html><body><h1>Salut depuis mon serveur Go !</h1></body></html>"
-	reponse := "HTTP/1.1 200 OK\r\n" +
-		"Content-Type: text/html; charset=UTF-8\r\n" +
-		fmt.Sprintf("Content-Length: %d\r\n", len(body)) +
-		"Connection: close\r\n" +
-		"\r\n" +
-		body
+	parties := strings.Split(premiereLigne, " ")
+	if len(parties) < 3 {
+		return
+	}
+	methode := parties[0]
+	cible := parties[1]
 
-	conn.Write([]byte(reponse))
+	if methode != "CONNECT" {
+		clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\nProxy HTTP classique non supporte, utilisez le HTTPS."))
+		return
+	}
+
+	serverConn, err := net.Dial("tcp", cible)
+	if err != nil {
+		fmt.Println("Erreur de connexion à la cible :", err)
+		return
+	}
+	defer serverConn.Close()
+
+	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+	go io.Copy(clientConn, serverConn)
+	io.Copy(serverConn, clientConn)
 }
